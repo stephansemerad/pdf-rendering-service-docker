@@ -9,15 +9,10 @@ from os import listdir
 from os.path import isfile, join
 
 
-# Folder Structure
-# ----------------------------------------------------------------------------------------------
-dir_path                    = os.path.dirname(os.path.realpath(__file__))
-print('dir_path: ', dir_path)  
-
-
 # Start Flask
 # ----------------------------------------------------------------------------------------------
 app = Flask(__name__, template_folder="templates", static_folder="files", static_url_path="/files")
+app.config['SECRET_KEY'] = 'QFZwHgcXay'
 worker.rq.init_app(app)
 
 # Main Page
@@ -72,8 +67,12 @@ def last_5_jobs():
     for pdf_id, filename, status, job_id, created_at, enqueued_at, processed_at, processing_time, img_count in data:
         table += '''
             <tr>
-                <th scope="row">'''+str(pdf_id)+'''</th>
-                <td>'''+str(filename)+'''</td>
+                <th>'''+str(pdf_id)+'''</th>
+                <td>
+                    <a id="pdf_'''+str(pdf_id)+'''" onclick="get_pdf_id_imgs('''+str(pdf_id)+''')" href="" data-bs-toggle="modal" data-bs-target="#modal">
+                    '''+str(filename)+'''
+                    </a>
+                </td>
                 <td>'''+str(status)+'''</td>
                 <td>'''+str(job_id)+'''</td>
                 <td>'''+str(created_at)+'''</td>
@@ -91,22 +90,57 @@ def last_5_jobs():
 
 @app.route('/queue_count', methods=['GET'])
 def queue_count():
-    return str(str(len(joblist)))
+    q = worker.rq.get_queue()
+    jobs = q.get_job_ids()
+    return str(str(len(jobs)))
 
 @app.route('/queue_list', methods=['GET'])
 def queue_list():
+
+
+    table = '''
+        <table class="table table-bordered" style="font-size:12px">
+        <thead>
+            <tr>
+                <th scope="col">num</th>
+                <th scope="col">job_id</th>
+                <th scope="col">pdf_id</th>
+            </tr>
+        </thead>
+        <tbody>
+    '''
+
     print('queue_list')
     q = worker.rq.get_queue()
     jobs = q.get_job_ids()
+    counter = 0
     for job_id in jobs:
-        print(i)
+        counter += 1
+        print(job_id)
         job = rq.worker.Job.fetch(job_id, connection=worker.rq.connection)
-        object = job
-        object_methods = [method_name for method_name in dir(object) if callable(getattr(object, method_name))]
-        return(str(object_methods))
+        table += '''
+            <tr>
+                <th scope="row">'''+str(counter)+'''</th>
+                <th>'''+str(job.get_id())+'''</th>
+                <th>'''+str(job.get_status())+'''</th>
+             </tr>
+            <tr>
+        '''   
+    table += '''
+    </tbody>
+    </table>
+    '''
+    return table
 
-    return str(jobs)
-
+@app.route('/get_pdf_id_imgs', methods=['GET'])
+def get_pdf_id_imgs():
+    pdf_id = request.args.get('pdf_id')
+    sql = '''select pdf_id, img_id, pdf_page from imgs where pdf_id = '''+br(pdf_id)+''' order by img_id '''
+    data = select(sql)
+    html = ''
+    for pdf_id, img_id, pdf_page in data: 
+        html += f'<img id="{img_id}" class="img-fluid" tyle="width:100%;;" src="/files/imgs/{pdf_id}_{pdf_page}.png"></img>'
+    return html 
 
 # Helper Functions for Development
 # ----------------------------------------------------------------------------------------------
@@ -153,23 +187,14 @@ def delete_job(job_id):
     except Exception as e:
         return str(e)
 
-
 # API 
 # ----------------------------------------------------------------------------------------------
 @app.route('/documents',methods = ['POST'])
 @app.route('/documents/<document_id>',methods = ['GET'])
 @app.route('/documents/<document_id>/pages/<number>',methods = ['GET'])
 def documents(document_id='', number=''):
-    print('\n[+] new_request')
-    print('----------------------------')
-    print('document_id: ', document_id)
-    print('number: ', document_id)
-    print('headers: ', request.headers)
-    print('ip address: ', request.remote_addr)
-    print('args: ',         request.args)
-
     api_key = ''
-    if 'api-key' in request.headers:
+    if 'api-key' in request.headers: 
         api_key = request.headers['api-key']
     else:
         if 'api-key' in request.args:
@@ -189,10 +214,6 @@ def documents(document_id='', number=''):
             print('API Key is Ok')
             if request.method == 'POST':
                 print('request.method POST')
-                print('data: ', request.data)
-                print('files: ',request.files)
-                print('len: ',len(request.files))
-                print('keys: ',request.files.keys())
 
                 # Check how many files were passed
                 if len(request.files) > 1: 
@@ -205,9 +226,6 @@ def documents(document_id='', number=''):
                     return app.response_class(response=json.dumps(json_data),status=400,mimetype='application/json')
                    
                 # Make sure it is a PDF
-                print('files: ',request.files['file'].filename)
-                print(request.files['file'].filename[-4:])
-
                 if request.files['file'].filename[-4:].lower() != '.pdf':
                     json_data = {"error":"400 - Bad Request - API can only process PDF's at this moment "}
                     return app.response_class(response=json.dumps(json_data),status=400,mimetype='application/json')
@@ -221,21 +239,16 @@ def documents(document_id='', number=''):
                     json_data = {"error":"500  - Internal Server Error "}
                     return app.response_class(response=json.dumps(json_data),status=500,mimetype='application/json')
 
-
                 # Save the PDF file 
                 print('pdf_id: ', pdf_id)
                 if pdf_id == '':
-
                     json_data = {"error":"500  - Internal Server Error "}
                     return app.response_class(response=json.dumps(json_data),status=500,mimetype='application/json')
                 else:
-
-                    print('\n FILE SAVING ', request.files['file'])
                     request.files['file'].save(f'/app/files/pdfs/{pdf_id}.pdf')
 
-                    # # Add to Redis Processing Queue and Saving the information
+                    # Add job to Redis  Queue and save the information from the job into the db.
                     job = worker.background_job.queue(pdf_id)
-
                     sql = '''
                     update pdfs set 
                     enqueued_at ='''+br(job.enqueued_at)+''', 
@@ -244,8 +257,7 @@ def documents(document_id='', number=''):
                     '''
                     update(sql)
 
-                    # return the Value 
-
+                    # return the Value to the user.
                     json_data = {"id": str(pdf_id)}
                     return app.response_class(response=json.dumps(json_data),status=200,mimetype='application/json')
 
