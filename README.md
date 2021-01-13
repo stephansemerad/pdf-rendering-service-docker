@@ -5,4 +5,5 @@ cd/ pdf-rendering-service-docker
 sudo docker-compose build
 sudo docker-compose up &
 
-![alt text](https://github.com/stephansemerad/pdf-rendering-service-docker/blob/master/image.png?raw=true)
+![alt text](https://github.com/stephansemerad/pdf-rendering-service-docker/blob/main/image.png?raw=true)
+
