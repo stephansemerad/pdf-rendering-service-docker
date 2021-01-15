@@ -1,0 +1,37 @@
+
+version: '3'
+services:
+  app:
+    build: ./app
+    container_name: app 
+    expose: 
+      - 8080
+    restart: always
+    volumes:
+      - ./app:/app
+      - ./app/files:/app/files
+      
+    command: uwsgi app.ini
+
+  worker:
+    build: ./app
+    container_name: worker 
+    depends_on:
+      - redis
+    restart: always
+    volumes:
+      - ./app:/app
+      - ./app/files:/app/files
+    command: rqworker --name worker --url redis://redis:6379/0
+
+  nginx: 
+    build: ./nginx 
+    container_name: nginx 
+    restart: always
+    ports: 
+      - "80:80"
+
+  redis:
+    container_name: redis 
+    image: redis
+
